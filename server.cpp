@@ -3,6 +3,7 @@
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <memory.h>
+#include "thread.h"
 #include "server.h"
 
 Server::Server() : server_(-1) 
@@ -28,14 +29,7 @@ int Server::start()
         res = listen(server_, 10);
         if (res == -1)
             throw SocketException();
-        while (true) {
-            fd_t acceptor = accept(server_, NULL, NULL);
-            if (acceptor == -1)
-                throw SocketException();
-            clients_.push_back(acceptor);
-            res = 0;
-            printf("a client connected!\n");
-        }
+        res = 0;
     } catch(SocketException)
     {
         res = -1;
@@ -43,6 +37,17 @@ int Server::start()
             close(server_);
     }
     return res;
+}
+
+void Server::acceptConnection()
+{
+    while (true) {
+        fd_t acceptor = accept(server_, NULL, NULL);
+        if (acceptor == -1)
+            throw SocketException();
+        clients_.push_back(acceptor);
+        printf("Log: a client connected!\n");
+    }
 }
 
 Server::~Server()
@@ -57,3 +62,33 @@ Server::~Server()
     }
     printf("server dest\n");
 }
+
+void* acceptFunc(void *arg)
+{
+    Server *server_ptr = (Server *)arg;
+    server_ptr->acceptConnection();
+    return NULL;
+}
+
+int main()
+{
+    Server server;
+    int res = server.start();
+    if (res != -1)
+        printf("Server has started!\n");
+    else
+        printf("Server start failed.\n");
+
+    Thread accept_thread(&acceptFunc, (void *)&server);
+    accept_thread.start();
+
+    char op;
+    do
+    {
+        op = getchar();
+        
+    } while (op != 'q');
+    return 0;
+}
+
+

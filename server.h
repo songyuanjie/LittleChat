@@ -11,6 +11,7 @@ private:
     std::list<fd_t> clients_;
 public:
     int start();
+    void acceptConnection();
     Server();
     ~Server();
 };
