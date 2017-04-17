@@ -23,19 +23,25 @@ Client::~Client()
 
 void Client::recvMessage()
 {
-    char buf[BUFSIZ];
+    char buf[BUFSIZ+1];
     memset(buf, 0, sizeof(buf));
-    while (true)
+    while (connected_)
     {
-        recv(client_, buf, BUFSIZ, 0);
-        fprintf(stdout, "server: %s\n", buf);
+        int nread = recv(client_, buf, BUFSIZ, 0);
+        if (nread <= 0)
+        {
+            connected_ = false;
+            break;
+        }
+        buf[nread] = '\0';
+        fprintf(stdout, "Server: %s\n", buf);
     }
 }
 
 void Client::sendMessage()
 {
-    char write_buf[BUFSIZ];
-    while (true)
+    char write_buf[BUFSIZ+1];
+    while (connected_)
     {
         fgets(write_buf, BUFSIZ, stdin);
         size_t len = strlen(write_buf);
@@ -43,7 +49,12 @@ void Client::sendMessage()
             write_buf[len-1] = '\0';
         if (!strncmp(write_buf, "bye", 3))  
             break;
+        //printf("before client send:%s",write_buf);
         send(client_, write_buf, len, 0);
+    }
+    if (!connected_)
+    {
+        printf("Notice: Connection lost, client closed.\n");
     }
 }
 
@@ -63,6 +74,7 @@ int Client::connectToServer(const char *ip, unsigned short port)
         close(client_);
         return res;
     }
+    connected_ = true;
     return 0;
 }
 

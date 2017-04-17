@@ -47,7 +47,7 @@ void Server::acceptConnection()
         if (acceptor == -1)
             throw SocketException();
         clients_.push_back(acceptor);
-        printf("Log: a client connected!\n");
+        printf("a client connected, id: %d!\n", acceptor);
     }
 }
 
@@ -58,6 +58,7 @@ void Server::sendMessage(fd_t client, char *message)
 
 void Server::sendMessageToAll(char *message)
 {
+    //printf("before server send:%s",message);
     std::list<fd_t>::iterator it = clients_.begin();
     while (it != clients_.end())
     {
@@ -69,7 +70,7 @@ void Server::sendMessageToAll(char *message)
 void Server::recvMessage()
 {
     fd_set read_set; 
-    char buf[BUFSIZ];
+    char buf[BUFSIZ+1];
     struct timeval time_val;
     while (true)
     {
@@ -89,16 +90,17 @@ void Server::recvMessage()
             it = clients_.begin();
             if (FD_ISSET(*it, &read_set))
             {
-                ioctl(*it, FIONREAD, &nread);
-                if (nread == 0)
+                nread = recv(*it, buf, BUFSIZ, 0);
+                if (nread <= 0)
                 {
+                    printf("a client disconnected, id: %d!\n", *it);
                     close(*it);
                     clients_.erase(it);
                 }
                 else
                 {
-                    recv(*it, buf, nread, 0);
-                    printf("client: %s\n", buf);
+                    buf[nread] = '\0';
+                    printf("Client: %s\n", buf);
                 }
             }
         }
@@ -120,7 +122,6 @@ Server::~Server()
 
 void* acceptFunc(void *arg)
 {
-    printf("acceptConn\n");
     Server *server_ptr = (Server *)arg;
     server_ptr->acceptConnection();
     return NULL;
@@ -128,7 +129,6 @@ void* acceptFunc(void *arg)
 
 void* recvFunc(void *arg)
 {
-    printf("recvMessage\n");
     Server *server_ptr = (Server *)arg;
     server_ptr->recvMessage();
     return NULL;
@@ -140,8 +140,7 @@ int main()
     int res = server.start();
     if (res == -1)
     {
-        printf("Server start failed.\n");
-        perror("server start");
+        perror("Server start");
         return 1;
     }
 
@@ -153,24 +152,23 @@ int main()
     Thread recv_thread(&recvFunc, (void *)&server);
     recv_thread.start();
 
-    char op;
+    char op[2];
     char buf[BUFSIZ];
     do
     {
-        op = getchar();
-        if (op == '\n')
-            continue;
-        else if (op == 's')
+        fgets(op, 2, stdin);
+        if (op[0] == 's')
         {
             //scanf("%s", buf);
+            memset(buf, 0, sizeof(buf));
             fgets(buf, BUFSIZ, stdin);
             size_t len = strlen(buf);
             if (buf[len-1] == '\n')
                 buf[len-1] = '\0';
-            server.sendMessageToAll(buf);
+            server.sendMessageToAll(buf+1);
         }
         
-    } while (op != 'q');
+    } while (op[0] != 'q');
     return 0;
 }
 

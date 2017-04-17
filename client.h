@@ -4,6 +4,7 @@ class Client
 {
 private:
     fd_t client_;
+    bool connected_;
 public:
     Client();
     ~Client();
