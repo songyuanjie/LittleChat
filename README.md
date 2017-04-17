@@ -1,2 +1,2 @@
 # LittleChat
-a small chat tools - just for practice linux socket communication
+a small chat tools - just for practicing linux socket communication

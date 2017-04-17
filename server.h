@@ -12,6 +12,9 @@ private:
 public:
     int start();
     void acceptConnection();
+    void recvMessage();
+    void sendMessage(fd_t client, char *message);
+    void sendMessageToAll(char *message);
     Server();
     ~Server();
 };

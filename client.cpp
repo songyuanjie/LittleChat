@@ -1,4 +1,5 @@
 #include <unistd.h>
+#include <stdlib.h>
 #include <memory.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -6,6 +7,7 @@
 #include <arpa/inet.h>
 #include "client.h"
 #include "thread.h"
+#include "mutex.h"
 
 Client::Client() : client_(-1)
 {
@@ -16,15 +18,17 @@ Client::~Client()
 {
     if (client_ > 0)
         close(client_);
+    printf("client destroy\n");
 }
 
 void Client::recvMessage()
 {
     char buf[BUFSIZ];
+    memset(buf, 0, sizeof(buf));
     while (true)
     {
         recv(client_, buf, BUFSIZ, 0);
-        printf("server: %s", buf);
+        fprintf(stdout, "server: %s\n", buf);
     }
 }
 
@@ -34,9 +38,12 @@ void Client::sendMessage()
     while (true)
     {
         fgets(write_buf, BUFSIZ, stdin);
-        if (!strncmp(write_buf, "end", 3))  
+        size_t len = strlen(write_buf);
+        if (write_buf[len-1] == '\n')
+            write_buf[len-1] = '\0';
+        if (!strncmp(write_buf, "bye", 3))  
             break;
-        send(client_, write_buf, BUFSIZ, 0);
+        send(client_, write_buf, len, 0);
     }
 }
 
@@ -73,14 +80,13 @@ int main()
     Client client;
     int res = client.connectToServer("127.0.0.1", 8888);
     if (res == -1)
+    {
         printf("connect failed!\n");
-    else
-        printf("connect success!\n");
-
+        return 1;
+    }
+    printf("connect success!\n");
     Thread recvThread(&recvData, (void *)&client);
     recvThread.start();
-    
     client.sendMessage();
-    
     return 0;
 }
