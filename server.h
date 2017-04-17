@@ -14,7 +14,7 @@ public:
     void acceptConnection();
     void recvMessage();
     void sendMessage(fd_t client, char *message);
-    void sendMessageToAll(char *message);
+    void sendMessageToAll(char *message, int except = 0);
     Server();
     ~Server();
 };

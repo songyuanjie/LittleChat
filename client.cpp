@@ -34,7 +34,7 @@ void Client::recvMessage()
             break;
         }
         buf[nread] = '\0';
-        fprintf(stdout, "Server: %s\n", buf);
+        fprintf(stdout, "%s\n", buf);
     }
 }
 
