@@ -88,20 +88,26 @@ void Server::recvMessage()
         if (res > 0)
         {
             it = clients_.begin();
-            if (FD_ISSET(*it, &read_set))
+            while (it != clients_.end())
             {
-                nread = recv(*it, buf, BUFSIZ, 0);
-                if (nread <= 0)
+                if (FD_ISSET(*it, &read_set))
                 {
-                    printf("a client disconnected, id: %d!\n", *it);
-                    close(*it);
-                    clients_.erase(it);
+                    nread = recv(*it, buf, BUFSIZ, 0);
+                    if (nread <= 0)
+                    {
+                        printf("a client disconnected, id: %d!\n", *it);
+                        close(*it);
+                        it = clients_.erase(it);
+                    }
+                    else
+                    {
+                        buf[nread] = '\0';
+                        printf("Client: %s\n", buf);
+                        ++it;
+                    }
                 }
                 else
-                {
-                    buf[nread] = '\0';
-                    printf("Client: %s\n", buf);
-                }
+                    ++it;
             }
         }
     }
