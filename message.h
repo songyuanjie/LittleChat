@@ -5,7 +5,6 @@
 
 /*
  * 0 normal message
- * 1 nickname
  */
 class Message
 {
