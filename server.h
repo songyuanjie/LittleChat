@@ -1,4 +1,5 @@
 #include "common.h"
+#include "message.h"
 #include <list>
 
 #ifndef _CHAT_SERVER_H_
@@ -13,8 +14,8 @@ public:
     int start();
     void acceptConnection();
     void recvMessage();
-    void sendMessage(fd_t client, char *message);
-    void sendMessageToAll(char *message, int except = 0);
+    void sendMessage(fd_t client, Message *message);
+    void sendMessageToAll(Message *message, int except = 0);
     Server();
     ~Server();
 };

@@ -51,12 +51,16 @@ void Server::acceptConnection()
     }
 }
 
-void Server::sendMessage(fd_t client, char *message)
+void Server::sendMessage(fd_t client, Message *message)
 {
-    send(client, message, strlen(message), 0);
+    char *ptr = NULL;
+    size_t len = 0;
+    message->serialize(ptr, len);
+    send(client, ptr, len, 0); 
+    delete[] ptr;
 }
 
-void Server::sendMessageToAll(char *message, int except)
+void Server::sendMessageToAll(Message *message, int except)
 {
     //printf("before server send:%s",message);
     std::list<fd_t>::iterator it = clients_.begin();
@@ -72,7 +76,6 @@ void Server::recvMessage()
 {
     fd_set read_set; 
     char buf[BUFSIZ+1];
-    char message[BUFSIZ+10];
     struct timeval time_val;
     while (true)
     {
@@ -104,9 +107,10 @@ void Server::recvMessage()
                     else
                     {
                         buf[nread] = '\0';
-                        sprintf(message, "client%d: ", *it);
-                        strcat(message, buf);
-                        sendMessageToAll(message, *it);
+                        Message *msg = new Message;
+                        msg->unserialize(buf, nread);
+                        sendMessageToAll(msg, *it);
+                        delete msg;
                         ++it;
                     }
                 }
@@ -164,7 +168,6 @@ int main()
 
     char op[2];
     char buf[BUFSIZ];
-    char message[BUFSIZ+8];
     do
     {
         fgets(op, 2, stdin);
@@ -176,9 +179,8 @@ int main()
             size_t len = strlen(buf);
             if (buf[len-1] == '\n')
                 buf[len-1] = '\0';
-            strcpy(message, "server: ");
-            strcat(message, buf+1);
-            server.sendMessageToAll(message);
+            Message *msg = new Message(buf);
+            server.sendMessageToAll(msg);
         }
         
     } while (op[0] != 'q');

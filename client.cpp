@@ -7,9 +7,10 @@
 #include <arpa/inet.h>
 #include "client.h"
 #include "thread.h"
+#include "message.h"
 #include "mutex.h"
 
-Client::Client() : client_(-1)
+Client::Client() : client_(-1), nickname_(NULL), connected_(false)
 {
 
 }
@@ -18,12 +19,23 @@ Client::~Client()
 {
     if (client_ > 0)
         close(client_);
+    if (nickname_)
+        delete[] nickname_;
     printf("client destroy\n");
+}
+
+void Client::setNickname(const char* name)
+{
+    size_t len = strlen(name) + 1;
+    if (nickname_)
+        delete[] nickname_;
+    nickname_ = new char[len];
+    strcpy(nickname_, name);
 }
 
 void Client::recvMessage()
 {
-    char buf[BUFSIZ+1];
+    char buf[BUFSIZ+103];
     memset(buf, 0, sizeof(buf));
     while (connected_)
     {
@@ -34,23 +46,35 @@ void Client::recvMessage()
             break;
         }
         buf[nread] = '\0';
-        fprintf(stdout, "%s\n", buf);
+        Message msg;
+        msg.unserialize(buf, nread);
+        if (msg.getType() == 0)
+        {
+            printf("%s\n", msg.getData());
+        }
     }
 }
 
 void Client::sendMessage()
 {
-    char write_buf[BUFSIZ+1];
+    char write_buf[BUFSIZ+103];
+    memset(write_buf, 0, sizeof(write_buf));
+    strcpy(write_buf, nickname_);
+    strcat(write_buf, ": ");
+    size_t offset = strlen(nickname_) + 2;
     while (connected_)
     {
-        fgets(write_buf, BUFSIZ, stdin);
+        fgets(write_buf+offset, BUFSIZ, stdin);
         size_t len = strlen(write_buf);
         if (write_buf[len-1] == '\n')
             write_buf[len-1] = '\0';
-        if (!strncmp(write_buf, "bye", 3))  
-            break;
-        //printf("before client send:%s",write_buf);
-        send(client_, write_buf, len, 0);
+        if (!strncmp(write_buf+offset, "bye", 3))  
+            break;  
+        Message msg(write_buf);
+        char *ptr = NULL;
+        msg.serialize(ptr, len);
+        send(client_, ptr, len, 0);
+        delete[] ptr;
     }
     if (!connected_)
     {
@@ -90,6 +114,11 @@ void* recvData(void *arg)
 int main()
 {
     Client client;
+    char nickname[100];
+    printf("Please input your nickname: ");
+    fgets(nickname, 100, stdin);
+    nickname[strlen(nickname)-1] = '\0';
+    client.setNickname(nickname);
     int res = client.connectToServer("127.0.0.1", 8888);
     if (res == -1)
     {
