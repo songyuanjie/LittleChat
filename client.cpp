@@ -3,14 +3,15 @@
 #include <memory.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/epoll.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <errno.h>
+#include <boost/shared_ptr.hpp>
 #include "client.h"
-#include "thread.h"
 #include "message.h"
-#include "mutex.h"
 
-Client::Client() : client_(-1), nickname_(NULL), connected_(false)
+Client::Client() : client_(0), nickname_(NULL), connected_(false)
 {
 
 }
@@ -31,103 +32,102 @@ void Client::setNickname(const char* name)
         delete[] nickname_;
     nickname_ = new char[len];
     strcpy(nickname_, name);
-}
-
-void Client::recvMessage()
-{
-    char buf[BUFSIZ+103];
-    memset(buf, 0, sizeof(buf));
-    while (connected_)
-    {
-        int nread = recv(client_, buf, BUFSIZ, 0);
-        if (nread <= 0)
-        {
-            connected_ = false;
-            break;
-        }
-        buf[nread] = '\0';
-        Message msg;
-        msg.unserialize(buf, nread);
-        if (msg.getType() == 0)
-        {
-            printf("%s\n", msg.getData());
-        }
-    }
-}
-
-void Client::sendMessage()
-{
-    char write_buf[BUFSIZ+103];
-    memset(write_buf, 0, sizeof(write_buf));
-    strcpy(write_buf, nickname_);
-    strcat(write_buf, ": ");
-    size_t offset = strlen(nickname_) + 2;
-    while (connected_)
-    {
-        fgets(write_buf+offset, BUFSIZ, stdin);
-        size_t len = strlen(write_buf);
-        if (write_buf[len-1] == '\n')
-            write_buf[len-1] = '\0';
-        if (!strncmp(write_buf+offset, "bye", 3))  
-            break;  
-        Message msg(write_buf);
-        char *ptr = NULL;
-        msg.serialize(ptr, len);
-        send(client_, ptr, len, 0);
-        delete[] ptr;
-    }
-    if (!connected_)
-    {
-        printf("Notice: Connection lost, client closed.\n");
-    }
+    Message msg(name, 0, 2); 
+    send(client_, msg.getBytes(), msg.getBytesLen(), 0);
 }
 
 int Client::connectToServer(const char *ip, unsigned short port)
 {
-    client_ = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_port = htons(port);
-    server_addr.sin_addr.s_addr = inet_addr(ip);
+    if (inet_pton(AF_INET, ip, &server_addr.sin_addr) <= 0)
+    {
+        return -1;
+    }
     server_addr.sin_family = AF_INET;
-    //printf("%d %d %d", sizeof(server_addr.sin_port), sizeof(server_addr.sin_addr), sizeof(server_addr.sin_family));
-    socklen_t server_len = sizeof(server_addr);
-    int res = connect(client_, (struct sockaddr *)&server_addr, server_len);
+    server_addr.sin_port = htons(port);
+    client_ = socket(AF_INET, SOCK_STREAM, 0);
+    int res = connect(client_, (struct sockaddr *)&server_addr, sizeof(server_addr));
     if (res == -1)
     {
-        close(client_);
+        if (client_ > 0)
+            close(client_);
         return res;
     }
     connected_ = true;
     return 0;
 }
 
-void* recvData(void *arg)
+void Client::handleInput(IPoller *poller, fd_t fd)
 {
-    printf("thread start\n");
-    Client *client_ptr = (Client *)arg; 
-    client_ptr->recvMessage();
-    pthread_exit(NULL);
-    return NULL;
+    char buf[BUF_SIZE_MAX];
+    if (fd == 0)
+    {
+        memset(buf, 0, sizeof(buf));
+        fgets(buf, BUFSIZ, stdin);
+        if (!strncmp(buf, "quit", 4))
+        {
+            connected_ = false;
+            return; 
+        }
+        Message msg(buf);
+        send(client_, msg.getBytes(), msg.getBytesLen(), 0);
+    }
+    else if (fd == client_)
+    {
+        memset(buf, 0, sizeof(buf));
+        int ret = recv(client_, buf, BUFSIZ-1, 0);
+        if (ret <= 0)
+        {
+            close(client_);
+            connected_ = false;
+            printf("connection lost!\n");
+            return;
+        }
+        Message msg(buf, ret);
+        printf("%s", msg.getMsg());
+    }
 }
 
-int main()
+int Client::work()
 {
+    boost::shared_ptr<IPoller> poller(new EPoller);
+    poller->addFd(client_, IPoller::POLL_READ);
+    poller->addFd(0, IPoller::POLL_READ);
+    poller->setHandler(this);
+    while(connected_)
+    {
+        poller->poll();
+    } 
+    return 1;
+}
+
+int main(int argc, char* argv[])
+{
+    int port = 8888;
+    const char *ip = "127.0.0.1";
+    if (argc == 2)
+    {
+        port = atoi(argv[1]);
+    }
+    else if (argc == 3)
+    {
+        ip = argv[1];
+        port = atoi(argv[2]);
+    }
     Client client;
-    char nickname[100];
+    char nickname[NICKNAME_LEN_MAX];
     printf("Please input your nickname: ");
-    fgets(nickname, 100, stdin);
+    fgets(nickname, NICKNAME_LEN_MAX, stdin);
     nickname[strlen(nickname)-1] = '\0';
-    client.setNickname(nickname);
-    int res = client.connectToServer("127.0.0.1", 8888);
+    int res = client.connectToServer(ip, port);
     if (res == -1)
     {
         printf("connect failed!\n");
         return 1;
     }
     printf("connect success!\n");
-    Thread recvThread(&recvData, (void *)&client);
-    recvThread.start();
-    client.sendMessage();
+    client.setNickname(nickname);
+    client.work();
     return 0;
 }

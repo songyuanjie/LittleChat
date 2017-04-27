@@ -4,186 +4,182 @@
 #include <sys/ioctl.h>
 #include <netinet/in.h>
 #include <memory.h>
+#include <string>
+#include "message.h"
 #include "mutex.h"
 #include "thread.h"
 #include "server.h"
 
-Server::Server() : server_(-1) 
+Server::Server() : server_(0), start_(false)
 {
+    int ret = pipe(pipefd_);
+    if (ret == -1)
+        throw std::string("pipe error");
 }
 
 int Server::start()
 {
-    int res;
+    int ret;
     try {
         server_ = socket(AF_INET, SOCK_STREAM, 0);
         if (server_ == -1)
-            throw SocketException();
+            throw std::string("Server::start() : create socket failed");
+        int reuse = 1;
+        setsockopt(server_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
         struct sockaddr_in server_addr;
         memset(&server_addr, 0, sizeof(server_addr));
         server_addr.sin_family = AF_INET;
         server_addr.sin_port = htons(8888);
         server_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        res = bind(server_, (struct sockaddr *)&server_addr, sizeof(server_addr));
-        if (res == -1)
-            throw SocketException();
-        res = listen(server_, 10);
-        if (res == -1)
-            throw SocketException();
-        res = 0;
-    } catch(SocketException)
+        ret = bind(server_, (struct sockaddr *)&server_addr, sizeof(server_addr));
+        if (ret == -1)
+            throw std::string("Server::start() : bind failed");
+        ret = listen(server_, 10);
+        if (ret == -1)
+            throw std::string("Server::start() : listen failed");
+        ret = 0;
+        start_ = true;
+    } catch(std::string)
     {
-        res = -1;
-        if (server_)
+        ret = -1;
+        if (server_ > 0)
             close(server_);
     }
-    return res;
-}
-
-void Server::acceptConnection()
-{
-    while (true) {
-        fd_t acceptor = accept(server_, NULL, NULL);
-        if (acceptor == -1)
-            throw SocketException();
-        clients_.push_back(acceptor);
-        printf("a client connected, id: %d!\n", acceptor);
-    }
-}
-
-void Server::sendMessage(fd_t client, Message *message)
-{
-    char *ptr = NULL;
-    size_t len = 0;
-    message->serialize(ptr, len);
-    send(client, ptr, len, 0); 
-    delete[] ptr;
-}
-
-void Server::sendMessageToAll(Message *message, int except)
-{
-    //printf("before server send:%s",message);
-    std::list<fd_t>::iterator it = clients_.begin();
-    while (it != clients_.end())
-    {
-        if (except != *it)
-            sendMessage(*it, message);
-        ++it;
-    }
-}
-
-void Server::recvMessage()
-{
-    fd_set read_set; 
-    char buf[BUFSIZ+1];
-    struct timeval time_val;
-    while (true)
-    {
-        time_val.tv_sec = 5;
-        time_val.tv_usec = 0;
-        FD_ZERO(&read_set);
-        std::list<fd_t>::iterator it = clients_.begin();
-        while (it != clients_.end())
-        {
-            FD_SET(*it, &read_set);
-            ++it;
-        }
-        int res = select(FD_SETSIZE, &read_set, (fd_set *)NULL, (fd_set *)NULL, &time_val);
-        int nread;
-        if (res > 0)
-        {
-            it = clients_.begin();
-            while (it != clients_.end())
-            {
-                if (FD_ISSET(*it, &read_set))
-                {
-                    nread = recv(*it, buf, BUFSIZ, 0);
-                    if (nread <= 0)
-                    {
-                        printf("a client disconnected, id: %d!\n", *it);
-                        close(*it);
-                        it = clients_.erase(it);
-                    }
-                    else
-                    {
-                        buf[nread] = '\0';
-                        Message *msg = new Message;
-                        msg->unserialize(buf, nread);
-                        sendMessageToAll(msg, *it);
-                        delete msg;
-                        ++it;
-                    }
-                }
-                else
-                    ++it;
-            }
-        }
-    }
+    return ret;
 }
 
 Server::~Server()
 {
     if (server_ > 0)
         close(server_);
-    std::list<fd_t>::iterator it = clients_.begin();
-    while (it != clients_.end())
+    for (ClientInfoIter it = clients_.begin(); it != clients_.end(); ++it)
     {
-        close(*it);
-        ++it;
+        close(it->first);
     }
-    printf("server destroy\n");
 }
 
-void* acceptFunc(void *arg)
+void Server::stop()
 {
-    Server *server_ptr = (Server *)arg;
-    server_ptr->acceptConnection();
-    return NULL;
+    start_ = false; 
+    if (server_ > 0)
+        close(server_);
+    server_ = 0;
+    char ch = 0;
+    write(pipefd_[1], &ch, 1);
 }
 
-void* recvFunc(void *arg)
+void Server::work()
 {
-    Server *server_ptr = (Server *)arg;
-    server_ptr->recvMessage();
+    boost::shared_ptr<IPoller> poller(new EPoller);
+    poller->addFd(server_, IPoller::POLL_READ);
+    poller->addFd(pipefd_[0], IPoller::POLL_READ);
+    poller->setHandler(this);
+    while (start_) {
+        /*printf("poll clients:\n");
+        }*/
+        poller->poll();
+    }
+}
+
+void Server::handleInput(IPoller *poller, fd_t fd)
+{
+    if (fd == server_)
+    {
+        ClientInfoPtr client_p(new ClientInfo); 
+        struct sockaddr_in *client_addr_p = &(client_p->addr_);
+        socklen_t addr_len = sizeof(*client_addr_p);
+        int acceptor = accept(server_, (struct sockaddr *)client_addr_p, &addr_len);
+        if (acceptor == -1)
+            return;
+        client_p->fd_ = acceptor;
+        memset(client_p->nickname_, 0, sizeof(client_p->nickname_));
+        sprintf(client_p->nickname_, "default%d", acceptor);
+        int ret =  poller->addFd(acceptor, IPoller::POLL_READ);
+        if (ret == -1)
+        {
+            close(acceptor);
+            return;
+        }
+        clients_[acceptor] = client_p;
+        printf("a client connected!id:%d\n", acceptor);
+    }
+    else if (fd == pipefd_[0])
+    {
+
+    }
+    else
+    {
+        char buf[BUF_SIZE_MAX];
+        memset(buf, 0, sizeof(buf));
+        int ret = recv(fd, buf, BUF_SIZE_MAX, 0); 
+        if (ret <= 0)
+        {
+            close(fd);
+            clients_.erase(fd);
+            printf("a client disconnected! id : %d\n", fd);
+            return;
+        }
+        Message msg(buf, ret);
+        if (msg.getType() == 0)
+        {
+            memset(buf, 0, sizeof(buf));
+            sprintf(buf, "%s: %s", clients_[fd]->nickname_, msg.getMsg());
+            printf("%s", buf);
+            Message nickmsg(buf);
+            for (ClientInfoIter it = clients_.begin(); it != clients_.end(); ++it)
+            {
+                if (it->first != fd)
+                    send(it->first, nickmsg.getBytes(), nickmsg.getBytesLen(), 0); 
+            }
+        }
+        else if (msg.getType() == 2)
+        {
+            strcpy(clients_[fd]->nickname_, msg.getMsg());
+        }
+    }
+}
+
+void Server::handleError(IPoller *poller, fd_t fd)
+{
+    printf("handler error");
+    close(fd);
+    clients_.erase(fd);
+    printf("a client disconnected! id : %d\n", fd);
+}
+
+void* thread_func(void *arg)
+{
+    Server *server_p = (Server *)arg;
+    server_p->work();
     return NULL;
 }
 
 int main()
 {
     Server server;
-    int res = server.start();
-    if (res == -1)
+    int ret = server.start();
+    if (ret == -1)
     {
         perror("Server start");
         return 1;
     }
-
     printf("Server has started!\n");
-
-    Thread accept_thread(&acceptFunc, (void *)&server);
-    accept_thread.start();
-
-    Thread recv_thread(&recvFunc, (void *)&server);
-    recv_thread.start();
-
-    char op[2];
-    char buf[BUFSIZ];
-    do
+    Thread thread(&thread_func, &server);
+    thread.start();
+    char op[10];
+    while(true)
     {
-        fgets(op, 2, stdin);
-        if (op[0] == 's')
+        scanf("%s", op);
+        if (!strncmp(op, "quit", 4))
         {
-            //scanf("%s", buf);
-            memset(buf, 0, sizeof(buf));
-            fgets(buf, BUFSIZ, stdin);
-            size_t len = strlen(buf);
-            if (buf[len-1] == '\n')
-                buf[len-1] = '\0';
-            Message *msg = new Message(buf);
-            server.sendMessageToAll(msg);
+            server.stop();
+            break;
         }
-        
-    } while (op[0] != 'q');
+        else
+            printf("invalid operation!\n");
+    }
+    thread.join();
     return 0;
 }
 

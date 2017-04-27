@@ -3,52 +3,70 @@
 #include <stdio.h>
 #include <arpa/inet.h>
 
-Message::Message(const char *str, unsigned short type) : type_(type)
+Message::Message(const char *str, size_t len, unsigned short type) : type_(type), data_(NULL), bytes_data_(NULL), len_(0), bytes_len_(len)
 {
     if (str)
     {
-        data_ = new char[strlen(str)+1];
-        memset(data_, 0, strlen(str)+1);
-        strcpy(data_, str);
+        if (!len) 
+        {
+            len_ = strlen(str)+1;
+            data_ = new char[len_];
+            memcpy(data_, str, len_);
+            serialize();
+        }
+        else
+        {
+            bytes_data_ = new char[bytes_len_];
+            memcpy(bytes_data_, str, len);
+            unserialize();
+        }
     }
-    else
+}
+
+void Message::serialize()
+{
+    if (!len_ || !data_)
+        return;
+    if (bytes_len_ && bytes_data_)
     {
-        data_ = NULL; 
+        bytes_len_ = 0;
+        delete[] bytes_data_;
     }
-}
-
-void Message::serialize(char* &str, size_t &len)
-{
-    len = sizeof(type_) + strlen(data_) + 1;
-    str = new char[len];
-    memset(str, 0, len * sizeof(char));
     unsigned short type = htons(type_);
-    char *tmp_ptr = (char *)&type;
-    str[0] = *tmp_ptr;
-    str[1] = *(tmp_ptr+1);
-    strcat(str + 2, data_);
+    bytes_len_ = sizeof(type_) + len_;
+    bytes_data_ = new char[bytes_len_];
+    memcpy(bytes_data_, &type, sizeof(type));
+    memcpy(bytes_data_ + sizeof(type), data_, len_);
 }
 
-void Message::unserialize(char* str, size_t len)
+void Message::unserialize()
 {
-    char *tmp_ptr = (char *)&type_;
-    tmp_ptr[0] = str[0];
-    tmp_ptr[1] = str[1];
+    if (!bytes_len_ || !bytes_data_)
+        return;
+    if (len_ && data_)
+    {
+        len_ = 0;
+        delete[] data_;
+    }
+    memcpy(&type_, bytes_data_, sizeof(type_));
     type_ = ntohs(type_);
-    data_ = new char[len-2];
-    strncpy(data_, str+2, len-2); 
+    len_ = bytes_len_ - sizeof(type_);
+    data_ = new char[len_];
+    memcpy(data_, bytes_data_ + sizeof(type_), len_);
 }
 
-/*
-int main()
+
+/*int main()
 {
-    Message msg("hello", 20);
-    char* ptr = NULL;
-    size_t len = 0;
-    msg.serialize(ptr, len);
-    Message msg2;
-    msg2.unserialize(ptr, len);
-    delete[] ptr;
+    Message msg("hello Worldgewagewg");
+    const char* ptr = msg.getBytes();
+    for (int i = 0; i < msg.getBytesLen(); i++)
+    {
+        printf("%c", *(ptr+i));
+    }
+    putchar(10);
+    Message msg2(msg.getBytes(), msg.getBytesLen());
+    printf("%s\n", msg2.getMsg());
     return 0;
 }
 */
