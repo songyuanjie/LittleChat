@@ -1,22 +1,43 @@
-#include "common.h"
+#ifndef _SERVER_H_
+#define _SERVER_H_
+
 #include <list>
+#include <boost/shared_ptr.hpp>
+#include <boost/unordered_map.hpp>
+#include "common.h"
+#include "poller.h"
 
-#ifndef _CHAT_SERVER_H_
-#define _CHAT_SERVER_H_
-
-class Server
+class Server : public PollHandler
 {
 private:
+    struct ClientInfo
+    {
+        fd_t fd_;
+        char nickname_[NICKNAME_LEN_MAX];
+        struct sockaddr_in addr_;
+    };
+    typedef boost::shared_ptr<ClientInfo> ClientInfoPtr;
+    typedef boost::unordered_map<fd_t, ClientInfoPtr> ClientContainer;
+    typedef ClientContainer::iterator ClientInfoIter;
+
     fd_t server_;
-    std::list<fd_t> clients_;
+    bool start_;
+    ClientContainer clients_;
+    int pipefd_[2];
 public:
     int start();
-    void acceptConnection();
-    void recvMessage();
-    void sendMessage(fd_t client, char *message);
-    void sendMessageToAll(char *message, int except = 0);
+
+    void work();
+
     Server();
-    ~Server();
+
+    virtual ~Server();
+
+    virtual void handleInput(IPoller *poller, fd_t fd);
+
+    virtual void handleError(IPoller *poller, fd_t fd);
+
+    void stop();
 };
 
 #endif

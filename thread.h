@@ -1,8 +1,8 @@
-#include "common.h"
-#include <pthread.h>
-
 #ifndef _THREAD_H_
 #define _THREAD_H_
+
+#include <pthread.h>
+
 typedef void* (*ThreadFunc) (void*);
 
 class Thread
